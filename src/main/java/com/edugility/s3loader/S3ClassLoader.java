@@ -14,9 +14,6 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.Objects;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import com.amazonaws.AmazonClientException;
 
 import com.amazonaws.services.s3.AmazonS3;
@@ -30,8 +27,6 @@ public class S3ClassLoader extends ClassLoader {
     registerAsParallelCapable();
   }
   
-  private static final Pattern dotPattern = Pattern.compile("\\.");
-
   /**
    * <h2>Thread Safety</h2>
    *
@@ -161,15 +156,7 @@ public class S3ClassLoader extends ClassLoader {
   }
 
   protected String toObjectKey(final String className) {
-    String returnValue = null;
-    if (className != null) {
-      final Matcher matcher = dotPattern.matcher(className);
-      assert matcher != null;
-      returnValue = matcher.replaceAll("/");
-      assert returnValue != null;
-      returnValue = new StringBuilder(returnValue).append(".class").toString();
-    }
-    return returnValue;
+    return className;
   }
   
 }
