@@ -54,11 +54,35 @@
 
   </dependencies>
 
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <com.edugility.s3loader.S3ClassLoader.bucketName>${com.edugility.s3loader.S3ClassLoader.bucketName}</com.edugility.s3loader.S3ClassLoader.bucketName>
+            <com.edugility.s3loader.TestS3ClassLoader.usageTermsAccepted>${com.edugility.s3loader.TestS3ClassLoader.usageTermsAccepted}</com.edugility.s3loader.TestS3ClassLoader.usageTermsAccepted>
+            <com.edugility.s3loader.TestS3ClassLoader.badClassName>${com.edugility.s3loader.S3ClassLoader.badClass}</com.edugility.s3loader.TestS3ClassLoader.badClassName>
+            <com.edugility.s3loader.TestS3ClassLoader.goodClassName>${com.edugility.s3loader.S3ClassLoader.goodClass}</com.edugility.s3loader.TestS3ClassLoader.goodClassName>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
   <properties>
+
+    <com.edugility.s3loader.TestS3ClassLoader.usageTermsAccepted>false</com.edugility.s3loader.TestS3ClassLoader.usageTermsAccepted>
+    <com.edugility.s3loader.TestS3ClassLoader.goodClassName></com.edugility.s3loader.TestS3ClassLoader.goodClassName>
+    <com.edugility.s3loader.TestS3ClassLoader.badClassName></com.edugility.s3loader.TestS3ClassLoader.badClassName>
+    <com.edugility.s3loader.S3ClassLoader.bucketName></com.edugility.s3loader.S3ClassLoader.bucketName>
 
     <!-- maven-compiler-plugin properties -->
     <maven.compiler.source>1.7</maven.compiler.source>
     <maven.compiler.target>1.7</maven.compiler.target>
+
+    <!-- maven-javadoc-plugin properties -->
+    <links>http://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/</links>
     
   </properties>
 

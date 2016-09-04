@@ -4,159 +4,245 @@
  */
 package com.edugility.s3loader;
 
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.InputStream;
-
 import java.net.URL;
 
-import java.util.Collections;
-import java.util.Enumeration;
+import java.security.CodeSource;
+
+import java.security.cert.Certificate;
+
 import java.util.Objects;
 
 import com.amazonaws.AmazonClientException;
 
 import com.amazonaws.services.s3.AmazonS3;
 
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.S3Object;
+import com.amazonaws.services.s3.model.GetObjectRequest;
 
-public class S3ClassLoader extends ClassLoader {
+/**
+ * A {@linkplain ClassLoader#registerAsParallelCapable()
+ * parallel-capable} {@link AbstractS3ClassLoader} that {@linkplain
+ * #findClass(String) loads <code>Class</code>es} from a single <a
+ * href="https://aws.amazon.com/s3">Amazon Simple Storage Service</a>
+ * <a
+ * href="http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingBucket.html">bucket</a>.
+ *
+ * @author <a href="http://about.me/lairdnelson"
+ * target="_parent">Laird Nelson</a>
+ *
+ * @see AbstractS3ClassLoader
+ *
+ * @see <a href="https://aws.amazon.com/s3">Amazon Simple Storage
+ * Service overview</a>
+ */
+public class S3ClassLoader extends AbstractS3ClassLoader {
 
-  static {
-    registerAsParallelCapable();
-  }
-  
   /**
-   * <h2>Thread Safety</h2>
-   *
-   * <p>This object <a
-   * href="https://forums.aws.amazon.com/message.jspa?messageID=191643#191643">is
-   * safe</a> for concurrent use by multiple threads.</p>
+   * Static initializer; calls the {@link
+   * ClassLoader#registerAsParallelCapable()} method.
    */
-  private final AmazonS3 client;
+  static {
+    ClassLoader.registerAsParallelCapable();
+  }
 
-  private final String bucketName;
+  /**
+   * The name of the <a
+   * href="http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingBucket.html">bucket</a>
+   * used to house Java class data.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #S3ClassLoader(ClassLoader, AmazonS3, String, boolean)
+   */
+  protected final String bucketName;
 
+  /**
+   * The {@link URL} of the <a
+   * href="http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingBucket.html">bucket</a>
+   * used to house Java class data.
+   *
+   * <p>This field may be {@code null} in rare cases.</p>
+   *
+   * <p>This field is set to the return value of the {@link
+   * AmazonS3#getUrl(String, String)} method invoked with the value of
+   * the {@link #bucketName} field and {@code null} as its two
+   * parameters.</p>
+   *
+   * @see #bucketName
+   *
+   * @see #S3ClassLoader(ClassLoader, AmazonS3, String, boolean)
+   *
+   * @see AmazonS3#getUrl(String, String)
+   */
+  protected final URL bucketUrl;
+
+  /**
+   * Indicates how the {@link
+   * GetObjectRequest#setRequesterPays(boolean)} method should be
+   * called when {@linkplain AmazonS3#getObject(GetObjectRequest)
+   * requesting} data from this {@link S3ClassLoader}'s {@linkplain
+   * #bucketName affiliated bucket}.
+   *
+   * @see #S3ClassLoader(ClassLoader, AmazonS3, String, boolean)
+   *
+   * @see GetObjectRequest#setRequesterPays(boolean)
+   */
+  protected final boolean requesterPays;
+
+
+  /*
+   * Constructors.
+   */
+  
+
+  /**
+   * Creates a new {@link S3ClassLoader}.
+   *
+   * @param parent the {@link ClassLoader} to which class loading
+   * requests will be initially delegated; may be {@code null}
+   *
+   * @param client the {@link AmazonS3} implementation to use to
+   * communicate with <a href="https://aws.amazon.com/s3/">Amazon's
+   * Simple Storage Service</a>; must not be {@code null}
+   *
+   * @param bucketName the name of the <a
+   * href="http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingBucket.html">bucket</a>
+   * from which Java {@link Class} instances will be assembled; must
+   * not be {@code null}
+   *
+   * @param requesterPays indicates how the {@link
+   * GetObjectRequest#setRequesterPays(boolean)} method should be
+   * called when {@linkplain AmazonS3#getObject(GetObjectRequest)
+   * requesting} data from the <a
+   * href="http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingBucket.html">bucket</a>
+   * identified by the {@code bucketName} parameter
+   *
+   * @exception NullPointerException if either {@code client} or
+   * {@code bucketName} is {@code null}
+   *
+   * @see AbstractS3ClassLoader#AbstractS3ClassLoader(ClassLoader,
+   * AmazonS3)
+   *
+   * @see #bucketUrl
+   */
   public S3ClassLoader(final ClassLoader parent,
                        final AmazonS3 client,
-                       final String bucketName) {
-    super(parent);
-    Objects.requireNonNull(client, "client == null");
+                       final String bucketName,
+                       final boolean requesterPays) {
+    super(parent, client);
     Objects.requireNonNull(bucketName, "bucketName == null");
-    this.client = client;
     this.bucketName = bucketName;
+    this.requesterPays = requesterPays;
+    URL bucketUrl = null;
+    try {
+      bucketUrl = client.getUrl(bucketName, null /* no key on purpose */);
+    } catch (final AmazonClientException ignore) {
+
+    } finally {
+      this.bucketUrl = bucketUrl;
+    }
   }
 
+
+  /*
+   * Instance methods.
+   */
+  
+
+  /**
+   * {@linkplain GetObjectRequest#GetObjectRequest(String, String)
+   * Creates} a new {@link GetObjectRequest} with this {@link
+   * S3ClassLoader}'s {@linkplain #bucketName affiliated bucket name},
+   * the supplied {@code className} and this {@link S3ClassLoader}'s
+   * {@linkplain #requesterPays "requester pays" status} and returns
+   * it.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method are permitted to return {@code null},
+   * which will typically cause a {@link ClassNotFoundException} to be
+   * thrown by the {@link #findClass(String)} method.</p>
+   *
+   * @param className the name of a Java class to load as supplied by
+   * the user; may be {@code null}
+   *
+   * @return a non-{@code null} {@link GetObjectRequest}
+   *
+   * @see #findClass(String)
+   *
+   * @see GetObjectRequest
+   *
+   * @see AmazonS3#getObject(GetObjectRequest)
+   */
   @Override
-  protected Class<?> findClass(final String name) throws ClassNotFoundException {
-    if (name == null) {
-      throw new ClassNotFoundException("null", new IllegalArgumentException("name == null"));
-    } else if (name.isEmpty()) {
-      throw new ClassNotFoundException(name, new IllegalArgumentException("name.isEmpty()"));
-    } else if (!Character.isJavaIdentifierStart(name.charAt(0))) {
-      throw new ClassNotFoundException(name, new IllegalArgumentException("!Character.isJavaIdentifierStart(name.charAt(0)): " + name));
-    }
-
-    Class<?> returnValue = null;
-    
-    assert this.client != null;
-
-    final String objectKey = this.toObjectKey(name);
-    if (objectKey == null) {
-      throw new ClassNotFoundException(name, new IllegalStateException("toObjectKey(\"" + name + "\") == null"));
-    }
-
-    try (final S3Object s3Object = this.client.getObject(this.bucketName, objectKey)) {
-      if (s3Object == null) {
-        throw new ClassNotFoundException(name);
-      } else {
-        final ObjectMetadata metadata = s3Object.getObjectMetadata();
-        if (metadata != null) {
-          final long sizeInBytes = metadata.getInstanceLength();
-          if (sizeInBytes > Integer.MAX_VALUE) {
-            throw new ClassNotFoundException(name, new IllegalStateException("s3Object.getObjectMetadata().getInstanceLength() > Integer.MAX_VALUE (" + Integer.MAX_VALUE + "): " + sizeInBytes));
-          } else if (sizeInBytes <= 0) {
-            throw new ClassNotFoundException(name, new IllegalStateException("s3Object.getObjectMetadata().getInstanceLength() <= 0: " + sizeInBytes));
-          } else {
-            final int bytesLength = (int)sizeInBytes;
-            final byte[] bytes = new byte[bytesLength];
-            try (final InputStream inputStream = s3Object.getObjectContent()) {
-              if (inputStream != null) {
-                int offset = 0;
-                while (offset < bytesLength) {
-                  final int numberOfBytesReadOnThisPass = inputStream.read(bytes, offset, bytesLength - offset);
-                  if (numberOfBytesReadOnThisPass < 0) {
-                    throw new EOFException();
-                  } else {
-                    offset += numberOfBytesReadOnThisPass;
-                  }
-                }              
-              }
-            }
-            returnValue = this.defineClass(name, bytes, 0, bytesLength);
-          }
-        }
-      }
-    } catch (final AmazonClientException | IOException e) {
-      throw new ClassNotFoundException(name, e);
-    }
-    return returnValue;
+  protected GetObjectRequest classNameToGetObjectRequest(final String className) {
+    final GetObjectRequest request = new GetObjectRequest(this.bucketName, className);
+    request.setRequesterPays(this.requesterPays);
+    return request;
   }
 
+  /**
+   * {@linkplain GetObjectRequest#GetObjectRequest(String, String)
+   * Creates} a new {@link GetObjectRequest} with this {@link
+   * S3ClassLoader}'s {@linkplain #bucketName affiliated bucket name},
+   * the supplied {@code resourceName} and this {@link
+   * S3ClassLoader}'s {@linkplain #requesterPays "requester pays"
+   * status} and returns it.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method are permitted to return {@code null},
+   * which will typically cause {@code null} to be returned by the
+   * {@link #findResource(String)} method.</p>
+   *
+   * @param resourceName the name of a resource to find as supplied by
+   * the user; may be {@code null}
+   *
+   * @return a non-{@code null} {@link GetObjectRequest}
+   *
+   * @see #findResource(String)
+   *
+   * @see GetObjectRequest
+   *
+   * @see AmazonS3#getObject(GetObjectRequest)
+   */
   @Override
-  public InputStream getResourceAsStream(final String name) {
-    InputStream returnValue = null;
-    final ClassLoader parent = this.getParent();
-    if (parent != null) {
-      returnValue = parent.getResourceAsStream(name);
-    }
-    if (name != null && returnValue == null) {
-      assert this.client != null;
-      assert this.bucketName != null;
-      try (final S3Object s3Object = this.client.getObject(this.bucketName, name)) {
-        if (s3Object != null) {
-          returnValue = s3Object.getObjectContent();
-        }
-      } catch (final AmazonClientException | IOException e) {
-        // TODO: log
-      }
-    }
-    return returnValue;
+  protected GetObjectRequest resourceNameToGetObjectRequest(final String resourceName) {
+    final GetObjectRequest request = new GetObjectRequest(this.bucketName, resourceName);
+    request.setRequesterPays(this.requesterPays);
+    return request;
   }
 
+  /**
+   * Overrides the {@link
+   * AbstractS3ClassLoader#getCodeSource(GetObjectRequest)} method to
+   * more efficiently return a {@link CodeSource} for the supplied
+   * {@link GetObjectRequest}.
+   *
+   * <p>This method may return {@code null}.</p>
+   *
+   * <p>Overrides of this method are permitted to return {@code
+   * null}.</p>
+   *
+   * @param request the {@link GetObjectRequest} for which a suitable
+   * {@link CodeSource} should be returned; may be {@code null} in
+   * which case {@code null} will be returned
+   *
+   * @return a {@link CodeSource} for the supplied {@link
+   * GetObjectRequest}, or {@code null}
+   *
+   * @see CodeSource
+   *
+   * @see #defineClass(String, byte[], int, int, CodeSource)
+   *
+   * @see AmazonS3#getUrl(String, String)
+   */
   @Override
-  protected URL findResource(final String name) {
-    URL returnValue = null;
-    if (name != null) {
-      assert this.client != null;
-      assert this.bucketName != null;
-      try {
-        returnValue = this.client.getUrl(this.bucketName, name);
-      } catch (final AmazonClientException e) {
-        // TODO: log
-      }
+  protected CodeSource getCodeSource(final GetObjectRequest request) {
+    if (this.bucketUrl == null) {
+      return null;
+    } else {
+      return new CodeSource(this.bucketUrl, (Certificate[])null /* no certificates */);
     }
-    return returnValue;
-  }
-
-  @Override
-  protected Enumeration<URL> findResources(final String name) throws IOException {
-    Enumeration<URL> returnValue = null;
-    if (name != null) {      
-      final URL resource = this.findResource(name);
-      if (resource != null) {
-        returnValue = Collections.enumeration(Collections.singleton(resource));
-      }
-    }
-    if (returnValue == null) {
-      returnValue = Collections.emptyEnumeration();
-    }
-    return returnValue;
-  }
-
-  protected String toObjectKey(final String className) {
-    return className;
   }
   
 }
